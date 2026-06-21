@@ -1,0 +1,6 @@
+{
+    "provider_name": "payme",
+    "version": "latest",
+    "framework": "django",
+    "download_url": "http://localhost:8000/packages/providers/django/payme/latest.tar.gz"
+}
