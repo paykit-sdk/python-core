@@ -7,7 +7,6 @@ commands/set.py
 core/__init__.py
 core/config.py
 core/fetcher.py
-core/loader.py
 paykit.egg-info/PKG-INFO
 paykit.egg-info/SOURCES.txt
 paykit.egg-info/dependency_links.txt

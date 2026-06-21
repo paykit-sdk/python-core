@@ -14,9 +14,25 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+
 from django.contrib import admin
+from django.http import HttpResponse
 from django.urls import path
 
-urlpatterns = [
-    path('admin/', admin.site.urls),
-]
+from paykit.providers.payme import generate_paylink
+
+
+def paykitit(request):
+    payment_link = generate_paylink(order_id=2, amount=200)
+    # payment_link = "nothing"
+    return HttpResponse(
+        f"""
+        <body style="background-color: black; color: white; font-family: sans-serif;">
+            <h1>{payment_link}</h1>
+        </body>
+        """.encode("utf-8"),
+        content_type="text/html",
+    )
+
+
+urlpatterns = [path("admin/", admin.site.urls), path("paykit/", paykitit)]

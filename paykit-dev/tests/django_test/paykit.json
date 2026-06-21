@@ -1,7 +1,0 @@
-{
-  "cdn_url": "http://localhost:8000",
-  "framework": "django",
-  "providers": {
-    "payme": "latest"
-  }
-}

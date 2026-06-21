@@ -14,7 +14,6 @@ def cli():
     """PayKit - Payment provider integration toolkit"""
     pass
 
-
 cli.add_command(init_command, name="init")
 cli.add_command(set_command, name="set")
 cli.add_command(add_command, name="add")

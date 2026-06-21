@@ -1,29 +1,28 @@
 """
-Core configuration management for PayKit
+Core configuration management for PayKit.
 
-Handles loading, saving, and validating paykit.json configuration,
-as well as managing provider installations in the library directory.
+Changes over original:
+- Atomic config saves (write temp → rename, no corrupt paykit.json on crash)
+- get_cdn_url() normalises scheme so fetcher always gets a valid URL
+- Multi-merchant: providers block supports per-provider config dict
+  { "payme": { "version": "latest", "config": { "PAYME_KEY": "..." } } }
+  as well as the original flat string form { "payme": "latest" }
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 
 class Config:
-    """Manages PayKit configuration and provider state"""
+    """Manages PayKit configuration and provider state."""
 
     CONFIG_FILENAME = "paykit.json"
-    DEFAULT_CDN_URL = "paykit.rf.gd"
+    DEFAULT_CDN_URL = "http://cdn.paykit.qzz.io"
 
     def __init__(self, project_dir: Optional[Path] = None):
-        """
-        Initialize configuration manager
-
-        Args:
-            project_dir: Project directory path (defaults to current directory)
-        """
         self.project_dir = project_dir or Path.cwd()
         self.config_path = self.project_dir / self.CONFIG_FILENAME
         self.library_dir = self._get_library_dir()
@@ -32,211 +31,151 @@ class Config:
 
     @staticmethod
     def _get_library_dir() -> Path:
-        """Get the PayKit library installation directory"""
         import paykit
+
         return Path(paykit.__file__).parent
 
+    # ── Load / save ──────────────────────────────────────────────────────────
+
     def load_config(self) -> Dict:
-        """
-        Load configuration from paykit.json
-
-        Returns:
-            Configuration dictionary
-
-        Raises:
-            FileNotFoundError: If config file doesn't exist
-            json.JSONDecodeError: If config file is invalid
-        """
         if not self.config_path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
-
-        with open(self.config_path, "r", encoding="utf-8") as f:
-            self._config_data = json.load(f)
-
+            raise FileNotFoundError(f"paykit.json not found: {self.config_path}")
+        with open(self.config_path, "r", encoding="utf-8") as fh:
+            self._config_data = json.load(fh)
         return self._config_data
 
     def save_config(self, config: Optional[Dict] = None) -> None:
-        """
-        Save configuration to paykit.json
-
-        Args:
-            config: Configuration dictionary (uses cached if None)
-        """
+        """Atomic save: write to .tmp then rename — crash-safe."""
         data = config or self._config_data
         if data is None:
             raise ValueError("No configuration data to save")
-
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-
+        tmp = self.config_path.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+        # os.replace is atomic on POSIX; near-atomic on Windows
+        os.replace(tmp, self.config_path)
         self._config_data = data
 
-    def initialize(self, framework: str = "django", cdn_url: Optional[str] = None) -> Dict:
-        """
-        Initialize a new paykit.json configuration
-
-        Args:
-            framework: Default framework to use
-            cdn_url: CDN URL for fetching providers
-
-        Returns:
-            Initial configuration dictionary
-        """
+    def initialize(
+        self, framework: str = "django", cdn_url: Optional[str] = None
+    ) -> Dict:
         config = {
             "cdn_url": cdn_url or self.DEFAULT_CDN_URL,
             "framework": framework,
-            "providers": {}
+            "providers": {},
         }
-
         self.save_config(config)
         return config
 
-    def get_framework(self) -> str:
-        """
-        Get the currently configured framework
+    # ── Getters ──────────────────────────────────────────────────────────────
 
-        Returns:
-            Framework name
-        """
-        config = self._config_data or self.load_config()
-        return config.get("framework", "django")
+    def _data(self) -> Dict:
+        return self._config_data or self.load_config()
+
+    def get_framework(self) -> str:
+        return self._data().get("framework", "django")
 
     def set_framework(self, framework: str) -> None:
-        """
-        Set the framework in configuration
-
-        Args:
-            framework: Framework name to set
-        """
-        config = self._config_data or self.load_config()
-        config["framework"] = framework
-        self.save_config(config)
+        cfg = self._data()
+        cfg["framework"] = framework
+        self.save_config(cfg)
 
     def get_cdn_url(self) -> str:
-        """
-        Get the CDN URL from configuration
+        url = self._data().get("cdn_url", self.DEFAULT_CDN_URL).rstrip("/")
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        return url
 
-        Returns:
-            CDN URL
-        """
-        config = self._config_data or self.load_config()
-        return config.get("cdn_url", self.DEFAULT_CDN_URL)
+    # ── Provider config (multi-merchant aware) ───────────────────────────────
 
     def get_providers(self) -> Dict[str, str]:
         """
-        Get configured providers and their versions
-
-        Returns:
-            Dictionary mapping provider names to versions
+        Returns {provider_name: version} — same shape as before.
+        Works whether the stored value is a plain version string or a dict.
         """
-        config = self._config_data or self.load_config()
-        return config.get("providers", {})
+        raw: Dict[str, Any] = self._data().get("providers", {})
+        out: Dict[str, str] = {}
+        for name, val in raw.items():
+            if isinstance(val, dict):
+                out[name] = val.get("version", "latest")
+            else:
+                out[name] = str(val)
+        return out
 
-    def add_provider(self, provider_name: str, version: str) -> None:
+    def get_provider_config(self, provider_name: str) -> Dict[str, Any]:
         """
-        Add or update a provider in configuration
-
-        Args:
-            provider_name: Provider name (e.g., "payme:uz")
-            version: Provider version
+        Returns per-provider runtime config dict if present, else {}.
+        This is where multi-merchant keys live, e.g.:
+          { "PAYME_KEY": "...", "CLICK_SECRET_KEY": "..." }
         """
-        config = self._config_data or self.load_config()
-        if "providers" not in config:
-            config["providers"] = {}
+        raw: Dict[str, Any] = self._data().get("providers", {})
+        val = raw.get(provider_name, {})
+        if isinstance(val, dict):
+            return val.get("config", {})
+        return {}
 
-        config["providers"][provider_name] = version
-        self.save_config(config)
+    def add_provider(
+        self, provider_name: str, version: str, config: Optional[Dict] = None
+    ) -> None:
+        """
+        Add or update a provider.
+        If config is given the entry is stored as a dict, otherwise as a plain version string.
+        """
+        cfg = self._data()
+        cfg.setdefault("providers", {})
+        if config:
+            existing = cfg["providers"].get(provider_name)
+            if isinstance(existing, dict):
+                existing["version"] = version
+                existing["config"] = config
+            else:
+                cfg["providers"][provider_name] = {"version": version, "config": config}
+        else:
+            cfg["providers"][provider_name] = version
+        self.save_config(cfg)
 
     def remove_provider(self, provider_name: str) -> None:
-        """
-        Remove a provider from configuration
+        cfg = self._data()
+        cfg.get("providers", {}).pop(provider_name, None)
+        self.save_config(cfg)
 
-        Args:
-            provider_name: Provider name to remove
-        """
-        config = self._config_data or self.load_config()
-        if "providers" in config and provider_name in config["providers"]:
-            del config["providers"][provider_name]
-            self.save_config(config)
+    # ── Installation state ───────────────────────────────────────────────────
 
     def get_installed_providers(self) -> Set[str]:
-        """
-        Get list of providers installed in library directory
-
-        Returns:
-            Set of installed provider names
-        """
         if not self.providers_dir.exists():
             return set()
-
-        installed = set()
-        for item in self.providers_dir.iterdir():
-            if item.is_dir() and not item.name.startswith("_"):
-                installed.add(item.name)
-
-        return installed
+        return {
+            p.name
+            for p in self.providers_dir.iterdir()
+            if p.is_dir() and not p.name.startswith("_")
+        }
 
     def is_provider_installed(self, provider_name: str) -> bool:
-        """
-        Check if a provider is installed in library directory
-
-        Args:
-            provider_name: Provider name to check
-
-        Returns:
-            True if provider is installed
-        """
-        provider_path = self.providers_dir / provider_name
-        return provider_path.exists() and provider_path.is_dir()
+        return (self.providers_dir / provider_name).is_dir()
 
     def remove_provider_installation(self, provider_name: str) -> None:
-        """
-        Remove provider installation from library directory
+        path = self.providers_dir / provider_name
+        if path.exists():
+            shutil.rmtree(path)
 
-        Args:
-            provider_name: Provider name to remove
-        """
-        provider_path = self.providers_dir / provider_name
-        if provider_path.exists():
-            shutil.rmtree(provider_path)
+    # ── Misc ─────────────────────────────────────────────────────────────────
 
     def get_python_version(self) -> str:
-        """
-        Get current Python version
-
-        Returns:
-            Python version string (e.g., "3.11")
-        """
         import sys
+
         return f"{sys.version_info.major}.{sys.version_info.minor}"
 
     def validate_config(self) -> bool:
-        """
-        Validate configuration structure
-
-        Returns:
-            True if configuration is valid
-
-        Raises:
-            ValueError: If configuration is invalid
-        """
-        config = self._config_data or self.load_config()
-
-        required_fields = ["cdn_url", "framework", "providers"]
-        for field in required_fields:
-            if field not in config:
+        cfg = self._data()
+        for field in ("cdn_url", "framework", "providers"):
+            if field not in cfg:
                 raise ValueError(f"Missing required field: {field}")
-
-        if not isinstance(config["providers"], dict):
-            raise ValueError("'providers' must be a dictionary")
-
+        if not isinstance(cfg["providers"], dict):
+            raise ValueError("'providers' must be a dict")
         return True
 
     def config_exists(self) -> bool:
-        """
-        Check if configuration file exists
-
-        Returns:
-            True if paykit.json exists
-        """
         return self.config_path.exists()
+
+
+config = Config()

@@ -1,188 +1,140 @@
 """
-Provider fetcher for downloading and installing providers from CDN
-
-Handles fetching provider metadata and downloading provider packages
-from the configured CDN server.
+Provider fetcher — downloads and installs providers from CDN.
 """
 
+import json
+import os
 import shutil
+import tarfile
+import time
 import zipfile
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
+
 import requests
 
 
 class ProviderFetcher:
-    """Manages fetching and installing providers from CDN"""
-
     def __init__(self, cdn_url: str, library_dir: Path):
-        """
-        Initialize provider fetcher
-
-        Args:
-            cdn_url: Base CDN URL for fetching providers
-            library_dir: PayKit library installation directory
-        """
-        self.cdn_url = cdn_url.rstrip("/")
+        raw = cdn_url.rstrip("/")
+        if not raw.startswith(("http://", "https://")):
+            raw = "https://" + raw
+        self.cdn_url = raw
         self.library_dir = library_dir
         self.providers_dir = library_dir / "providers"
         self.providers_dir.mkdir(parents=True, exist_ok=True)
 
-    def _build_metadata_url(self, framework: str, provider_name: str, version: str) -> str:
-        """
-        Build URL for provider metadata
+    # ── CDN discovery ─────────────────────────────────────────────────────────
 
-        Args:
-            framework: Framework name
-            provider_name: Provider name
-            version: Provider version
+    def fetch_available_providers(self, framework: str) -> List[str]:
+        """GET /providers/{framework}/available → list of provider names."""
+        url = f"{self.cdn_url}/providers/{framework}/available"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, list):
+            raise ValueError(f"Expected list from {url}, got {type(data)}")
+        return data
 
-        Returns:
-            Full metadata URL
-        """
-        # URL format: cdn_url/providers/<framework>/<provider_name>/<version>
-        path = f"providers/{framework}/{provider_name}/{version}"
-        return f"{self.cdn_url}/{path}"
+    def fetch_available_versions(self, framework: str, provider_name: str) -> List[str]:
+        """GET /providers/{framework}/{provider}/available → list of versions."""
+        url = f"{self.cdn_url}/providers/{framework}/{provider_name}/available"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, list):
+            raise ValueError(f"Expected list from {url}, got {type(data)}")
+        return data
 
     def fetch_metadata(self, framework: str, provider_name: str, version: str) -> Dict:
-        """
-        Fetch provider metadata from CDN
+        """GET /providers/{framework}/{provider}/{version} → metadata dict with download_url."""
+        url = f"{self.cdn_url}/providers/{framework}/{provider_name}/{version}"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        return resp.json()
 
-        Args:
-            framework: Framework name
-            provider_name: Provider name
-            version: Provider version
-
-        Returns:
-            Metadata dictionary containing version info and download link
-
-        Raises:
-            requests.RequestException: If fetching fails
-            json.JSONDecodeError: If metadata is invalid
-        """
-        url = self._build_metadata_url(framework, provider_name, version)
-
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-
-        metadata = response.json()
-        return metadata
-
-    def download_provider(
-        self,
-        framework: str,
-        provider_name: str,
-        version: str,
-        force: bool = False
-    ) -> Path:
-        """
-        Download and install provider from CDN
-
-        Args:
-            framework: Framework name
-            provider_name: Provider name
-            version: Provider version
-            force: Force re-download if already installed
-
-        Returns:
-            Path to installed provider directory
-
-        Raises:
-            requests.RequestException: If download fails
-            ValueError: If metadata is invalid
-        """
-        provider_dir = self.providers_dir / provider_name
-
-        # Check if already installed
-        if provider_dir.exists() and not force:
-            return provider_dir
-
-        # Remove existing installation if forcing
-        if provider_dir.exists():
-            shutil.rmtree(provider_dir)
-
-        # Fetch metadata to get download link
-        metadata = self.fetch_metadata(framework, provider_name, version)
-
-        if "download_url" not in metadata:
-            raise ValueError(f"Invalid metadata: missing download_url for {provider_name}")
-
-        download_url = metadata["download_url"]
-
-        # Download provider package
-        response = requests.get(download_url, timeout=60, stream=True)
-        response.raise_for_status()
-
-        # Save to temporary file
-        temp_file = self.providers_dir / f"{provider_name}_temp.zip"
-
-        try:
-            with open(temp_file, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-            # Extract provider
-            provider_dir.mkdir(parents=True, exist_ok=True)
-
-            with zipfile.ZipFile(temp_file, "r") as zip_ref:
-                zip_ref.extractall(provider_dir)
-
-        finally:
-            # Clean up temporary file
-            if temp_file.exists():
-                temp_file.unlink()
-
-        return provider_dir
+    # ── Install ───────────────────────────────────────────────────────────────
 
     def install_provider(
         self,
         framework: str,
         provider_name: str,
         version: str,
-        force: bool = False
-    ) -> bool:
-        """
-        Install provider with error handling
-
-        Args:
-            framework: Framework name
-            provider_name: Provider name
-            version: Provider version
-            force: Force re-installation
-
-        Returns:
-            True if installation successful
-        """
-        try:
-            self.download_provider(framework, provider_name, version, force)
-            return True
-        except Exception as e:
-            # Clean up on failure
-            provider_dir = self.providers_dir / provider_name
-            if provider_dir.exists():
-                shutil.rmtree(provider_dir)
-            raise
-
-    def verify_installation(self, provider_name: str) -> bool:
-        """
-        Verify that a provider is properly installed
-
-        Args:
-            provider_name: Provider name to verify
-
-        Returns:
-            True if provider appears to be properly installed
-        """
+        force: bool = False,
+    ) -> Path:
         provider_dir = self.providers_dir / provider_name
 
-        if not provider_dir.exists() or not provider_dir.is_dir():
+        if provider_dir.exists() and not force:
+            return provider_dir
+
+        metadata = self.fetch_metadata(framework, provider_name, version)
+        download_url = metadata.get("download_url", "").strip()
+        if not download_url:
+            raise ValueError(
+                f"CDN returned no download_url for {provider_name}@{version}"
+            )
+        if not download_url.startswith(("http://", "https://")):
+            download_url = "https://" + download_url
+
+        resp = requests.get(download_url, timeout=60, stream=True)
+        resp.raise_for_status()
+
+        # Unique temp paths — safe against concurrent paykit runs
+        uid = f"{os.getpid()}_{int(time.time() * 1000)}"
+        is_tar = ".tar" in download_url or download_url.endswith(".tgz")
+        suffix = ".tar.gz" if is_tar else ".zip"
+        tmp_archive = self.providers_dir / f"_{provider_name}_{uid}{suffix}"
+        tmp_dir = self.providers_dir / f"_{provider_name}_{uid}_extract"
+
+        try:
+            with open(tmp_archive, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    fh.write(chunk)
+
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+
+            if is_tar:
+                with tarfile.open(tmp_archive, "r:gz") as tf:
+                    tf.extractall(tmp_dir)
+            else:
+                with zipfile.ZipFile(tmp_archive, "r") as zf:
+                    zf.extractall(tmp_dir)
+
+            # The archive may wrap everything in a single top-level dir — unwrap it
+            extracted = list(tmp_dir.iterdir())
+            if len(extracted) == 1 and extracted[0].is_dir():
+                actual_dir = extracted[0]
+            else:
+                actual_dir = tmp_dir
+
+            if provider_dir.exists():
+                shutil.rmtree(provider_dir)
+            actual_dir.rename(provider_dir)
+
+        except Exception:
+            if tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        finally:
+            if tmp_archive.exists():
+                tmp_archive.unlink()
+            if tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        return provider_dir
+
+    def verify_installation(self, provider_name: str) -> bool:
+        provider_dir = self.providers_dir / provider_name
+        if not provider_dir.is_dir():
             return False
-
-        # Check for essential files
-        required_files = ["__init__.py", "manifest.json"]
-
-        for filename in required_files:
-            if not (provider_dir / filename).exists():
-                return False
-
+        if not (provider_dir / "__init__.py").exists():
+            return False
+        manifest = provider_dir / "manifest.json"
+        if not manifest.exists():
+            return False
+        try:
+            with open(manifest) as fh:
+                json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            return False
         return True
