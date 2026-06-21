@@ -1,0 +1,6 @@
+{
+    "provider_name": "payme",
+    "version": "1.0.0",
+    "framework": "django",
+    "download_url": "",
+}
