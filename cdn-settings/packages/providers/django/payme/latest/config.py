@@ -2,8 +2,6 @@ from collections import namedtuple
 
 fields = [
     "request_link",
-    "merchant_key",
-    "merchant_secret",
     "language",
     "callback_link",
 ]
@@ -13,6 +11,4 @@ language = "ru"
 callback_link = ""
 
 config_type = namedtuple("config_type", fields)
-defaults = config_type(
-    request_link, merchant_key, merchant_secret, language, callback_link
-)
+defaults = config_type(request_link, language, callback_link)
