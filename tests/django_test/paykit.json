@@ -3,5 +3,11 @@
   "framework": "django",
   "providers": {
     "payme": "latest"
+  },
+
+  "defaults": {
+    "payme": {
+      "language": "uz" // ru, uz, en
+    }
   }
 }

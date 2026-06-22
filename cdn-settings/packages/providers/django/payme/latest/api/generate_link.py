@@ -1,4 +1,4 @@
-from paykit.providers.payme.api.config import defaults
+from paykit.providers.payme.config import defaults
 
 
 def generate_paylink(
