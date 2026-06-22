@@ -1,4 +1,4 @@
-from paykit.providers.payme.config import defaults
+from paykit.providers.payme.api.config import defaults
 
 
 def generate_paylink(
@@ -31,5 +31,5 @@ def generate_paylink(
 
     encoded = base64.b64encode(params.encode()).decode()
 
-    encoded = params
+    # encoded = params
     return f"{defaults.request_link}/{encoded}"

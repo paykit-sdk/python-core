@@ -23,12 +23,12 @@ from paykit.providers.payme import generate_paylink
 
 
 def paykitit(request):
-    payment_link = generate_paylink(order_id=2, amount=200)
+    payment_link = generate_paylink(id=2, amount=200)
     # payment_link = "nothing"
     return HttpResponse(
         f"""
         <body style="background-color: black; color: white; font-family: sans-serif;">
-            <h1>{payment_link}</h1>
+            <a href="https://{payment_link}" target="_blank">{payment_link}</h1>
         </body>
         """.encode("utf-8"),
         content_type="text/html",

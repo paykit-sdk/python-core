@@ -1,1 +1,1 @@
-from .generate_link import generate_paylink
+from paykit.providers.payme.api import generate_paylink
