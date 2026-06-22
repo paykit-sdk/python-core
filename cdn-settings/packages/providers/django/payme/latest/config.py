@@ -9,8 +9,6 @@ fields = [
 ]
 
 request_link = "test.paycom.uz"
-merchant_key = "69d6d6113663bd982443630d"
-merchant_secret = ""
 language = "ru"
 callback_link = ""
 
