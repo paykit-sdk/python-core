@@ -7,7 +7,7 @@
 
   "defaults": {
     "payme": {
-      "language": "uz" // ru, uz, en
+      "language": "uz"
     }
   }
 }

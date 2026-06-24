@@ -60,7 +60,6 @@ class Config:
         self, framework: str = "django", cdn_url: Optional[str] = None
     ) -> Dict:
         config = {
-            "cdn_url": cdn_url or self.DEFAULT_CDN_URL,
             "framework": framework,
             "providers": {},
         }
@@ -79,6 +78,9 @@ class Config:
         cfg = self._data()
         cfg["framework"] = framework
         self.save_config(cfg)
+
+    def get_provider_defaults(self, provider_name: str) -> Dict[str, Any]:
+        return self._data().get("defaults", {}).get(provider_name, {})
 
     def get_cdn_url(self) -> str:
         url = self._data().get("cdn_url", self.DEFAULT_CDN_URL).rstrip("/")

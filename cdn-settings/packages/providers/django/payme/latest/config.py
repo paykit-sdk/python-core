@@ -1,14 +1,19 @@
 from collections import namedtuple
+from pathlib import Path
 
-fields = [
-    "request_link",
-    "language",
-    "callback_link",
-]
+from paykit.core.config import config
 
-request_link = "test.paycom.uz"
-language = "ru"
-callback_link = ""
+fields = ("request_link", "language", "callback_link")
+raw_defaults = {
+    "request_link": "https://checkout.paycom.uz",
+    "language": "ru",
+    "callback_link": "https://hello.world",
+}
 
-config_type = namedtuple("config_type", fields)
-defaults = config_type(request_link, language, callback_link)
+provider_name = Path(__file__).resolve().parent.name
+paykit = config.get_provider_defaults(provider_name)
+
+ProviderConfig = namedtuple("ProviderConfig", fields)
+defaults = ProviderConfig(**{k: paykit.get(k, raw_defaults[k]) for k in fields})
+
+request_link, language, callback_link = defaults

@@ -9,16 +9,16 @@ from paykit.providers.payme.models import (
 
 @admin.register(PaymeMerchant)
 class PaymeMerchantAdmin(admin.ModelAdmin):
-    list_display = ("name", "merchant_id", "is_enabled", "test_mode", "created_at")
-    list_filter = ("is_enabled", "test_mode")
-    search_fields = ("name", "merchant_id")
+    list_display = ("name", "merchant_key", "is_enabled", "created_at")
+    list_filter = ("is_enabled",)
+    search_fields = ("name", "merchant_key")
     readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(PaymeTransaction)
 class PaymeTransactionAdmin(admin.ModelAdmin):
     list_display = (
-        "transaction_id",
+        "payme_id",  # Payme's transaction identifier
         "order_id",
         "amount",
         "state",
@@ -26,7 +26,7 @@ class PaymeTransactionAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("state", "merchant")
-    search_fields = ("transaction_id", "order_id")
+    search_fields = ("payme_id", "order_id")
     readonly_fields = ("created_at", "updated_at")
 
 
