@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://paykit-sdk.github.io/paykit/</loc>
+         <lastmod>2026-06-25</lastmod>
+    </url>
+    <url>
+         <loc>https://paykit-sdk.github.io/paykit/usage/python/django/clayout/</loc>
+         <lastmod>2026-06-25</lastmod>
+    </url>
+    <url>
+         <loc>https://paykit-sdk.github.io/paykit/usage/python/django/payme/</loc>
+         <lastmod>2026-06-25</lastmod>
+    </url>
+</urlset>

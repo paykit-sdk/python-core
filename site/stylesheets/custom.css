@@ -1,0 +1,19 @@
+@media screen and (min-width: 76.25em) {
+    /* Swap the sidebar grid positions */
+    .md-sidebar--primary {
+        grid-column: 4; /* Moves main navigation to the right */
+    }
+    .md-sidebar--secondary {
+        grid-column: 2; /* Moves table of contents to the left */
+    }
+
+    /* Adjust visual padding so the borders line up cleanly */
+    .md-sidebar--primary {
+        padding-left: 0.6rem;
+        padding-right: 0;
+    }
+    .md-sidebar--secondary {
+        padding-right: 0.6rem;
+        padding-left: 0;
+    }
+}
