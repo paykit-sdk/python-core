@@ -12,9 +12,18 @@ Add the app and configure your Payme credentials:
 ```python
 INSTALLED_APPS = [
     ...
-    "paykit",
+    "paykit.providers.payme",
 ]
 ```
+
+or do
+
+```python
+INSTALLED_APPS = [
+    ...
+] + paykit.apps
+```
+to include all providers from paykit.json
 ---
 
 ## Migrations
