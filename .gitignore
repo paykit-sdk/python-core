@@ -1,5 +1,6 @@
-/paykit/providers
-paykit/paykit*
+paykit/providers/
+paykit/paykit.egg-info/
+
 *.egg*/
 muhammadali/
 db*
