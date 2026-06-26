@@ -113,9 +113,26 @@ def add_command(providers: tuple):
                 force=True,
             )
 
+            if config.is_provider_installed(provider_name):
+                click.echo(f"  Removing existing installation...")
+                config.remove_provider_installation(provider_name)
+
+            click.echo(f"  Fetching from CDN...")
+            fetcher.install_provider(
+                framework=framework,
+                provider_name=provider_name,
+                version=version,
+                force=True,
+            )
+
             if fetcher.verify_installation(provider_name):
                 config.add_provider(provider_name, version)
                 added.append(f"{provider_name}@{version}")
+
+                providers_init = fetcher.providers_dir / "__init__.py"
+                if not providers_init.exists():
+                    providers_init.write_text("")
+
                 click.echo(f"  ✓ {provider_name}@{version} added\n")
             else:
                 failed.append(spec)
