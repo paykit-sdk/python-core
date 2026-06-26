@@ -53,46 +53,46 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
-          run: |
-            BASE="cdn-settings/packages"
-            DIST="cdn-settings/dist/providers"
+        run: |
+          BASE="cdn-settings/packages"
+          DIST="cdn-settings/dist/providers"
 
-            gh release view "$TAG" --json tagName 2>/dev/null || \
-              gh release create "$TAG" --title "$TAG" --notes "SDK $TAG"
+          gh release view "$TAG" --json tagName 2>/dev/null || \
+            gh release create "$TAG" --title "$TAG" --notes "SDK $TAG"
 
-            for FRAMEWORK in "$BASE"/*/; do
-              FRAMEWORK_NAME=$(basename "$FRAMEWORK")
-              PROVIDERS=()
+          for FRAMEWORK in "$BASE"/*/; do
+            FRAMEWORK_NAME=$(basename "$FRAMEWORK")
+            PROVIDERS=()
 
-              for PROVIDER in "$FRAMEWORK"/*/; do
-                PROVIDER_NAME=$(basename "$PROVIDER")
-                VERSIONS=$(ls "$PROVIDER" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
-                LATEST=$(echo "$VERSIONS" | tail -1)
-                PROVIDERS+=("$PROVIDER_NAME")
+            for PROVIDER in "$FRAMEWORK"/*/; do
+              PROVIDER_NAME=$(basename "$PROVIDER")
+              VERSIONS=$(ls "$PROVIDER" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
+              LATEST=$(echo "$VERSIONS" | tail -1)
+              PROVIDERS+=("$PROVIDER_NAME")
 
-                for VERSION in $VERSIONS; do
-                  ARCHIVE="${FRAMEWORK_NAME}-${PROVIDER_NAME}-${VERSION//./-}.tar.gz"
-                  tar -czf "$ARCHIVE" -C "$PROVIDER" "$VERSION"
-                  gh release upload "$TAG" "$ARCHIVE" --clobber
+              for VERSION in $VERSIONS; do
+                ARCHIVE="${FRAMEWORK_NAME}-${PROVIDER_NAME}-${VERSION//./-}.tar.gz"
+                tar -czf "$ARCHIVE" -C "$PROVIDER" "$VERSION"
+                gh release upload "$TAG" "$ARCHIVE" --clobber
 
-                  URL="https://github.com/$REPO/releases/download/$TAG/$ARCHIVE"
-                  DIR="$DIST/$FRAMEWORK_NAME/$PROVIDER_NAME"
-                  mkdir -p "$DIR"
+                URL="https://github.com/$REPO/releases/download/$TAG/$ARCHIVE"
+                DIR="$DIST/$FRAMEWORK_NAME/$PROVIDER_NAME"
+                mkdir -p "$DIR"
 
-                  printf '{\n  "provider_name": "%s",\n  "version": "%s",\n  "framework": "%s",\n  "download_url": "%s"\n}\n' \
-                    "$PROVIDER_NAME" "$VERSION" "$FRAMEWORK_NAME" "$URL" > "$DIR/$VERSION"
+                printf '{\n  "provider_name": "%s",\n  "version": "%s",\n  "framework": "%s",\n  "download_url": "%s"\n}\n' \
+                  "$PROVIDER_NAME" "$VERSION" "$FRAMEWORK_NAME" "$URL" > "$DIR/$VERSION"
 
-                  if [ "$VERSION" = "$LATEST" ]; then
-                    printf '{\n  "provider_name": "%s",\n  "version": "latest",\n  "framework": "%s",\n  "download_url": "%s"\n}\n' \
-                      "$PROVIDER_NAME" "$FRAMEWORK_NAME" "$URL" > "$DIR/latest"
-                  fi
-                done
+                if [ "$VERSION" = "$LATEST" ]; then
+                  printf '{\n  "provider_name": "%s",\n  "version": "latest",\n  "framework": "%s",\n  "download_url": "%s"\n}\n' \
+                    "$PROVIDER_NAME" "$FRAMEWORK_NAME" "$URL" > "$DIR/latest"
+                fi
               done
-
-              AVAILABLE=$(printf '"%s",' "${PROVIDERS[@]}" | sed 's/,$//')
-              mkdir -p "$DIST/$FRAMEWORK_NAME"
-              echo "[$AVAILABLE]" > "$DIST/$FRAMEWORK_NAME/available"
             done
+
+            AVAILABLE=$(printf '"%s",' "${PROVIDERS[@]}" | sed 's/,$//')
+            mkdir -p "$DIST/$FRAMEWORK_NAME"
+            echo "[$AVAILABLE]" > "$DIST/$FRAMEWORK_NAME/available"
+          done
 
   deploy-cdn:
     runs-on: ubuntu-latest
