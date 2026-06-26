@@ -84,4 +84,4 @@ For Django-specific integration (views, webhook handlers, payment link generatio
 
 
 Inpired from [Paytechuz](https://paytechuz/paytechuz)
-Support [Muhammadli - Support group](https://t.me/paytechuz)
+Support [Muhammadali - Support group](https://t.me/paytechuz)
