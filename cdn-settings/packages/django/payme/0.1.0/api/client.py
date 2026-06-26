@@ -2,11 +2,10 @@ import logging
 
 import requests
 
+from paykit.providers.payme.config import request_link
 from paykit.providers.payme.models import PaymeMerchant
 
 logger = logging.getLogger(__name__)
-
-PAYME_SUBSCRIBE_URL = "https://checkout.paycom.uz/api"
 
 
 class PaymeSubscribeClient:
@@ -24,7 +23,7 @@ class PaymeSubscribeClient:
         }
         try:
             response = requests.post(
-                PAYME_SUBSCRIBE_URL,
+                request_link + "/api",
                 json=payload,
                 headers={
                     "X-Auth": merchant.merchant_key,

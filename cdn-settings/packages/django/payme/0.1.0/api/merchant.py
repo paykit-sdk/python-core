@@ -16,28 +16,34 @@ from paykit.providers.payme.models import (
 logger = logging.getLogger(__name__)
 
 
-class PaymeMerchantAPI:
-    """
-    Inherit this class and override check_order().
-    Auth is resolved from PaymeMerchant DB records — no hardcoded keys.
-    """
-
+class Triggers:
     def check_order(self, merchant: PaymeMerchant, order_id: str, amount: int) -> bool:
         """Return True if the order exists and amount is valid. Must be overridden."""
         raise NotImplementedError("check_order() must be implemented")
 
-    # ── Auth ─────────────────────────────────────────────────────────────────
+    def on_payment(self, merchant: PaymeMerchant, tx: PaymeTransaction) -> None:
+        """Called when a transaction is successfully performed. Must be overridden."""
+        print("on_payment() must be implemented")
+        # raise NotImplementedError("on_payment() must be implemented")
 
-    def resolve_merchant(self, authorization_header: str) -> PaymeMerchant | None:
-        creds = _decode_basic(authorization_header)
-        if not creds:
-            return None
-        _, password = creds
-        # Payme sends: login = "Paycom", password = merchant_secret
-        return PaymeMerchant.objects.filter(
-            merchant_secret=password,
-            is_enabled=True,
-        ).first()
+    def on_cancelled(self, merchant: PaymeMerchant, tx: PaymeTransaction) -> None:
+        """Called when a PENDING transaction is cancelled. Must be overridden."""
+        print("on_cancelled() must be implemented")
+        # raise NotImplementedError("on_cancelled() must be implemented")
+
+    def on_cancelled_after_perform(
+        self, merchant: PaymeMerchant, tx: PaymeTransaction
+    ) -> None:
+        """Called when an already PERFORMED transaction is cancelled. Must be overridden."""
+        print("on_cancelled_after_perform() must be implemented")
+        # raise NotImplementedError("on_cancelled_after_perform() must be implemented")
+
+
+class PaymeMerchantAPI(Triggers):
+    """
+    Inherit this class and override check_order().
+    Auth is resolved from PaymeMerchant DB records — no hardcoded keys.
+    """
 
     # ── Response builders ─────────────────────────────────────────────────────
 
@@ -49,6 +55,17 @@ class PaymeMerchantAPI:
         if data is not None:
             err["data"] = data
         return error_response(rpc_id, err)
+
+    def resolve_merchant(self, authorization_header: str) -> PaymeMerchant | None:
+        creds = _decode_basic(authorization_header)
+        if not creds:
+            return None
+        _, password = creds
+        # Payme sends: login = "Paycom", password = merchant_secret
+        return PaymeMerchant.objects.filter(
+            merchant_secret=password,
+            is_enabled=True,
+        ).first()
 
     # ── Dispatcher ────────────────────────────────────────────────────────────
 
@@ -90,7 +107,9 @@ class PaymeMerchantAPI:
         amount = params["amount"]
         order_id = params["account"]["order_id"]
 
-        tx = PaymeTransaction.objects.filter(payme_id=payme_id).first()
+        tx = PaymeTransaction.objects.filter(
+            payme_id=payme_id, merchant=merchant
+        ).first()
 
         if tx:
             if tx.state != PaymeTransaction.TransactionState.PENDING:
@@ -153,6 +172,8 @@ class PaymeMerchantAPI:
         tx.perform_time = _now_ms()
         tx.save(update_fields=["state", "perform_time"])
 
+        self.on_payment(merchant, tx)
+
         return self._ok(
             {
                 "transaction": str(tx.pk),
@@ -190,12 +211,14 @@ class PaymeMerchantAPI:
             tx.cancel_time = now
             tx.reason = reason
             tx.save(update_fields=["state", "cancel_time", "reason"])
+            self.on_cancelled(merchant, tx)
 
         elif tx.state == PaymeTransaction.TransactionState.PERFORMED:
             tx.state = PaymeTransaction.TransactionState.CANCELLED_AFTER_PERFORM
             tx.cancel_time = now
             tx.reason = reason
             tx.save(update_fields=["state", "cancel_time", "reason"])
+            self.on_cancelled_after_perform(merchant, tx)
 
         return self._ok(
             {

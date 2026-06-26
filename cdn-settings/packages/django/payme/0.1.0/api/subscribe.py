@@ -9,7 +9,6 @@ from paykit.providers.payme.api.errors import (
     error_response,
     success_response,
 )
-from paykit.providers.payme.api.utils import _decode_basic
 from paykit.providers.payme.models import (
     PaymeMerchant,
     PaymeSubscription,
@@ -21,29 +20,42 @@ logger = logging.getLogger(__name__)
 class PaymeSubscribeAPI:
     """
     Subscribe API — card tokenisation + recurring charges.
-    One instance per request; merchant resolved from Basic auth.
-    Requires payme_subscribe_client to be set (injected or overridden).
+    Merchant is resolved once at instantiation:
+      - None        → first enabled merchant in DB
+      - str         → merchant matched by name
+      - PaymeMerchant → used directly
     """
 
-    def __init__(self, subscribe_client=None):
-        """
-        subscribe_client: object with methods matching Payme Subscribe API.
-        Inject your HTTP client wrapper here.
-        """
-        if subscribe_client is not None:
-            self.client = subscribe_client
-        else:
-            self.client = PaymeSubscribeClient()
+    def __init__(
+        self, merchant: PaymeMerchant | str | None = None, subscribe_client=None
+    ):
+        self.merchant = self._resolve_merchant(merchant)
+        self.client = (
+            subscribe_client if subscribe_client is not None else PaymeSubscribeClient()
+        )
 
-    def resolve_merchant(self, authorization_header: str) -> PaymeMerchant | None:
-        creds = _decode_basic(authorization_header)
-        if not creds:
-            return None
-        _, password = creds
-        return PaymeMerchant.objects.filter(
-            merchant_secret=password,
-            is_enabled=True,
-        ).first()
+    # ── Merchant resolution ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _resolve_merchant(merchant: PaymeMerchant | str | None) -> PaymeMerchant:
+        if merchant is None:
+            obj = PaymeMerchant.objects.filter(is_enabled=True).first()
+            if not obj:
+                raise ValueError("No active merchant found in DB")
+            return obj
+
+        if isinstance(merchant, str):
+            obj = PaymeMerchant.objects.filter(name=merchant, is_enabled=True).first()
+            if not obj:
+                raise ValueError(f"No active merchant found with name '{merchant}'")
+            return obj
+
+        if isinstance(merchant, PaymeMerchant):
+            return merchant
+
+        raise TypeError(
+            f"merchant must be None, str, or PaymeMerchant — got {type(merchant)}"
+        )
 
     # ── Response builders ─────────────────────────────────────────────────────
 
@@ -58,12 +70,8 @@ class PaymeSubscribeAPI:
 
     # ── Dispatcher ────────────────────────────────────────────────────────────
 
-    def dispatch(self, body: dict, authorization_header: str) -> tuple[dict, int]:
+    def dispatch(self, body: dict) -> tuple[dict, int]:
         rpc_id = body.get("id")
-
-        merchant = self.resolve_merchant(authorization_header)
-        if not merchant:
-            return self._err(PaymeError.ACCESS_DENIED, rpc_id), HTTPStatus.OK
 
         method_name = body.get("method", "").replace(".", "_")
         handler: Callable | None = getattr(self, f"_{method_name}", None)
@@ -71,7 +79,7 @@ class PaymeSubscribeAPI:
             return self._err(PaymeError.METHOD_NOT_FOUND, rpc_id), HTTPStatus.OK
 
         try:
-            result = cast(dict, handler(body.get("params", {}), rpc_id, merchant))
+            result = cast(dict, handler(body.get("params", {}), rpc_id))
             return result, HTTPStatus.OK
         except Exception as exc:
             logger.exception("Subscribe API error in '%s'", method_name)
@@ -79,14 +87,10 @@ class PaymeSubscribeAPI:
 
     # ── cards.create ──────────────────────────────────────────────────────────
 
-    def _cards_create(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Initiate card tokenisation. Returns token + OTP prompt flag.
-        params: { card: { number, expire }, save: bool }
-        """
+    def _cards_create(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.cards_create(
-                merchant=merchant,
+                merchant=self.merchant,
                 card_number=params["card"]["number"],
                 card_expire=params["card"]["expire"],
                 save=params.get("save", True),
@@ -101,16 +105,10 @@ class PaymeSubscribeAPI:
 
     # ── cards.get_verify_code ─────────────────────────────────────────────────
 
-    def _cards_get_verify_code(
-        self, params: dict, rpc_id, merchant: PaymeMerchant
-    ) -> dict:
-        """
-        Request OTP SMS for the given token.
-        params: { token: str }
-        """
+    def _cards_get_verify_code(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.cards_get_verify_code(
-                merchant=merchant,
+                merchant=self.merchant,
                 token=params["token"],
             )
         except Exception as exc:
@@ -123,14 +121,10 @@ class PaymeSubscribeAPI:
 
     # ── cards.verify ──────────────────────────────────────────────────────────
 
-    def _cards_verify(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Verify OTP and activate token. Persists card_token to PaymeSubscription if order_id given.
-        params: { token: str, code: str, order_id: str (optional) }
-        """
+    def _cards_verify(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.cards_verify(
-                merchant=merchant,
+                merchant=self.merchant,
                 token=params["token"],
                 code=params["code"],
             )
@@ -140,11 +134,10 @@ class PaymeSubscribeAPI:
                 PaymeError.SubscribeError.OtpError.OTP_INVALID_CODE, rpc_id, str(exc)
             )
 
-        # Persist verified token to subscription if order_id was provided
         order_id = params.get("order_id")
         if order_id and result.get("card", {}).get("token"):
             PaymeSubscription.objects.update_or_create(
-                merchant=merchant,
+                merchant=self.merchant,
                 order_id=order_id,
                 defaults={
                     "card_token": result["card"]["token"],
@@ -157,14 +150,10 @@ class PaymeSubscribeAPI:
 
     # ── cards.check ───────────────────────────────────────────────────────────
 
-    def _cards_check(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Check card token validity.
-        params: { token: str }
-        """
+    def _cards_check(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.cards_check(
-                merchant=merchant,
+                merchant=self.merchant,
                 token=params["token"],
             )
         except Exception as exc:
@@ -175,37 +164,28 @@ class PaymeSubscribeAPI:
 
     # ── cards.remove ─────────────────────────────────────────────────────────
 
-    def _cards_remove(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Remove a card token.
-        params: { token: str }
-        """
+    def _cards_remove(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.cards_remove(
-                merchant=merchant,
+                merchant=self.merchant,
                 token=params["token"],
             )
         except Exception as exc:
             logger.exception("cards.remove failed")
             return self._err(PaymeError.SubscribeError.CARD_NOT_FOUND, rpc_id, str(exc))
 
-        # Deactivate any subscription tied to this token
         PaymeSubscription.objects.filter(
-            merchant=merchant, card_token=params["token"]
+            merchant=self.merchant, card_token=params["token"]
         ).update(state=PaymeSubscription.SubscriptionState.STATE_CANCELLED)
 
         return self._ok(result, rpc_id)
 
     # ── receipts.create ───────────────────────────────────────────────────────
 
-    def _receipts_create(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Create a payment receipt for a card charge.
-        params: { amount: int, account: { order_id: str }, description: str (optional) }
-        """
+    def _receipts_create(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.receipts_create(
-                merchant=merchant,
+                merchant=self.merchant,
                 amount=params["amount"],
                 account=params["account"],
                 description=params.get("description", ""),
@@ -220,21 +200,15 @@ class PaymeSubscribeAPI:
 
     # ── receipts.pay ─────────────────────────────────────────────────────────
 
-    def _receipts_pay(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Charge a card token against a receipt.
-        params: { id: str (receipt _id), token: str, payer: { phone: str } (optional) }
-        Automatically resolves token from PaymeSubscription if not provided.
-        """
+    def _receipts_pay(self, params: dict, rpc_id) -> dict:
         receipt_id = params["id"]
         token = params.get("token")
 
-        # Resolve token from active subscription when not explicitly passed
         if not token:
             order_id = params.get("account", {}).get("order_id")
             if order_id:
                 sub = PaymeSubscription.objects.filter(
-                    merchant=merchant,
+                    merchant=self.merchant,
                     order_id=order_id,
                     state=PaymeSubscription.SubscriptionState.STATE_ACTIVE,
                 ).first()
@@ -246,7 +220,7 @@ class PaymeSubscribeAPI:
 
         try:
             result = self.client.receipts_pay(
-                merchant=merchant,
+                merchant=self.merchant,
                 receipt_id=receipt_id,
                 token=token,
                 payer=params.get("payer", {}),
@@ -257,23 +231,18 @@ class PaymeSubscribeAPI:
                 PaymeError.SubscribeError.INSUFFICIENT_FUNDS, rpc_id, str(exc)
             )
 
-        # Update subscription last_payment_at
-        PaymeSubscription.objects.filter(merchant=merchant, card_token=token).update(
-            last_payment_at=datetime.now()
-        )
+        PaymeSubscription.objects.filter(
+            merchant=self.merchant, card_token=token
+        ).update(last_payment_at=datetime.now())
 
         return self._ok(result, rpc_id)
 
     # ── receipts.send ─────────────────────────────────────────────────────────
 
-    def _receipts_send(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Send a receipt to the payer via SMS.
-        params: { id: str, phone: str }
-        """
+    def _receipts_send(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.receipts_send(
-                merchant=merchant,
+                merchant=self.merchant,
                 receipt_id=params["id"],
                 phone=params["phone"],
             )
@@ -287,14 +256,10 @@ class PaymeSubscribeAPI:
 
     # ── receipts.cancel ───────────────────────────────────────────────────────
 
-    def _receipts_cancel(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Cancel an unpaid receipt.
-        params: { id: str }
-        """
+    def _receipts_cancel(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.receipts_cancel(
-                merchant=merchant,
+                merchant=self.merchant,
                 receipt_id=params["id"],
             )
         except Exception as exc:
@@ -307,14 +272,10 @@ class PaymeSubscribeAPI:
 
     # ── receipts.check ────────────────────────────────────────────────────────
 
-    def _receipts_check(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Check the status of a receipt.
-        params: { id: str }
-        """
+    def _receipts_check(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.receipts_check(
-                merchant=merchant,
+                merchant=self.merchant,
                 receipt_id=params["id"],
             )
         except Exception as exc:
@@ -327,14 +288,10 @@ class PaymeSubscribeAPI:
 
     # ── receipts.get ─────────────────────────────────────────────────────────
 
-    def _receipts_get(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        Get a receipt by id.
-        params: { id: str }
-        """
+    def _receipts_get(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.receipts_get(
-                merchant=merchant,
+                merchant=self.merchant,
                 receipt_id=params["id"],
             )
         except Exception as exc:
@@ -347,14 +304,10 @@ class PaymeSubscribeAPI:
 
     # ── receipts.get_all ──────────────────────────────────────────────────────
 
-    def _receipts_get_all(self, params: dict, rpc_id, merchant: PaymeMerchant) -> dict:
-        """
-        List receipts with optional filters.
-        params: { count: int, _from: int, _to: int, offset: int }
-        """
+    def _receipts_get_all(self, params: dict, rpc_id) -> dict:
         try:
             result = self.client.receipts_get_all(
-                merchant=merchant,
+                merchant=self.merchant,
                 count=params.get("count", 50),
                 from_time=params.get("_from"),
                 to_time=params.get("_to"),
@@ -369,4 +322,5 @@ class PaymeSubscribeAPI:
         return self._ok(result, rpc_id)
 
 
+# Module-level default instance — first enabled merchant
 sapi = PaymeSubscribeAPI()

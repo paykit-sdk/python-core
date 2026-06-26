@@ -6,7 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 from paykit.providers.payme.api.merchant import PaymeMerchantAPI
 
 
-class MerchantAPIView(PaymeMerchantAPI):
+class MerchantAPIViewRaw(PaymeMerchantAPI):
     @classmethod
     def as_view(cls):
         @csrf_exempt
