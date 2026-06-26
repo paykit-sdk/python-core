@@ -58,7 +58,11 @@ jobs:
           DIST="cdn-settings/dist/providers"
 
           gh release view "$TAG" --json tagName 2>/dev/null || \
-            gh release create "$TAG" --title "$TAG" --notes "SDK $TAG"
+            gh release create "$TAG" \
+              --tag "$TAG" \
+              --title "$TAG" \
+              --notes "SDK $TAG" \
+              --latest=false
 
           for FRAMEWORK in "$BASE"/*/; do
             FRAMEWORK_NAME=$(basename "$FRAMEWORK")
