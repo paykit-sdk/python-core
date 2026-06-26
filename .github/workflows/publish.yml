@@ -1,29 +1,70 @@
-name: Publish to PyPI
+name: Publish
 
 on:
   push:
     tags:
-      - "v*" # triggers on tags like v0.1.0
+      - "v*"
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-
       - name: Install build tools
         run: pip install build twine
-
       - name: Build
         run: python -m build paykit/
-
       - name: Publish
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: twine upload paykit/dist/*
+
+  cdn-release:
+    runs-on: ubuntu-latest
+    needs: publish # only runs if publish succeeds
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Release CDN packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          BASE="cdn-settings/packages"
+
+          for FRAMEWORK in "$BASE"/*/; do
+            FRAMEWORK_NAME=$(basename "$FRAMEWORK")
+            for PROVIDER in "$FRAMEWORK"/*/; do
+              PROVIDER_NAME=$(basename "$PROVIDER")
+              VERSIONS=$(ls "$PROVIDER" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
+              LATEST=$(echo "$VERSIONS" | tail -1)
+
+              for VERSION in $VERSIONS; do
+                RELEASE_TAG="${FRAMEWORK_NAME}-${PROVIDER_NAME}-v${VERSION}"
+                ARCHIVE="${FRAMEWORK_NAME}-${PROVIDER_NAME}-${VERSION//./-}.tar.gz"
+
+                if git tag | grep -q "^$RELEASE_TAG$"; then
+                  echo "Skipping $RELEASE_TAG"
+                  continue
+                fi
+
+                tar -czf "$ARCHIVE" -C "$PROVIDER" "$VERSION"
+
+                MAKE_LATEST="false"
+                [ "$VERSION" = "$LATEST" ] && MAKE_LATEST="true"
+
+                gh release create "$RELEASE_TAG" "$ARCHIVE" \
+                  --title "$RELEASE_TAG" \
+                  --notes "Released with SDK $TAG" \
+                  --latest=$MAKE_LATEST
+              done
+            done
+          done
