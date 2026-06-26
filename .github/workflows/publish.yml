@@ -44,26 +44,12 @@ jobs:
             for PROVIDER in "$FRAMEWORK"/*/; do
               PROVIDER_NAME=$(basename "$PROVIDER")
               VERSIONS=$(ls "$PROVIDER" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
-              LATEST=$(echo "$VERSIONS" | tail -1)
 
               for VERSION in $VERSIONS; do
-                RELEASE_TAG="${FRAMEWORK_NAME}-${PROVIDER_NAME}-v${VERSION}"
                 ARCHIVE="${FRAMEWORK_NAME}-${PROVIDER_NAME}-${VERSION//./-}.tar.gz"
-
-                if git tag | grep -q "^$RELEASE_TAG$"; then
-                  echo "Skipping $RELEASE_TAG"
-                  continue
-                fi
-
                 tar -czf "$ARCHIVE" -C "$PROVIDER" "$VERSION"
-
-                MAKE_LATEST="false"
-                [ "$VERSION" = "$LATEST" ] && MAKE_LATEST="true"
-
-                gh release create "$RELEASE_TAG" "$ARCHIVE" \
-                  --title "$RELEASE_TAG" \
-                  --notes "Released with SDK $TAG" \
-                  --latest=$MAKE_LATEST
+                gh release upload "$TAG" "$ARCHIVE" --clobber
               done
+
             done
           done
