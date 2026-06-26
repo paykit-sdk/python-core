@@ -129,7 +129,7 @@ class ProviderFetcher:
             return False
         if not (provider_dir / "__init__.py").exists():
             return False
-        manifest = provider_dir / "manifest.json"
+        manifest = provider_dir / "_manifest.json"
         if not manifest.exists():
             return False
         try:

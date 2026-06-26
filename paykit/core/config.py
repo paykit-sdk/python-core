@@ -169,7 +169,7 @@ class Config:
 
     def validate_config(self) -> bool:
         cfg = self._data()
-        for field in ("cdn_url", "framework", "providers"):
+        for field in ("framework", "providers"):
             if field not in cfg:
                 raise ValueError(f"Missing required field: {field}")
         if not isinstance(cfg["providers"], dict):

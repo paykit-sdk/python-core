@@ -9,8 +9,12 @@ __email__ = "splayerme@gmail.com"
 from paykit.core.config import Config
 from paykit.core.fetcher import ProviderFetcher
 
-# from paykit.core.loader import ProviderLoader
+__all__ = ["Config", "ProviderFetcher", "__version__", "setup"]
 
-# __all__ = ["Config", "ProviderFetcher", "ProviderLoader", "__version__"]
 
-__all__ = ["Config", "ProviderFetcher", "__version__"]
+# django specific stuff
+def setup():
+    """For non-Django frameworks."""
+    from paykit.apps import _autodiscover_providers
+
+    _autodiscover_providers()
