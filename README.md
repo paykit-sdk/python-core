@@ -5,7 +5,7 @@ Payment provider integration toolkit for Django and other web frameworks.
 ## Installation
 
 ```bash
-pip install paykit
+pip install paykit-sdk
 ```
 
 ## Quick Start
@@ -80,4 +80,4 @@ paykit init
 
 ---
 
-For Django-specific integration (views, webhook handlers, payment link generation), see [Usage](/paykit/usage).
+For Django-specific integration (views, webhook handlers, payment link generation), see [Usage](https://paykit-sdk.github.io/python-core/usage/python/django/payme/).

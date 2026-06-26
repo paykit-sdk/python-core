@@ -5,7 +5,7 @@ Payment provider integration toolkit for Django and other web frameworks.
 ## Installation
 
 ```bash
-pip install paykit
+pip install paykit-sdk
 ```
 
 ## Quick Start
