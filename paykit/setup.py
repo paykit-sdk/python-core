@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="paykit-sdk",
-    version="0.1.0",
+    version="0.1.1",
     author="Abror Qodirov",
     author_email="splayerme@gmail.com",
     description="Payment provider integration toolkit",
