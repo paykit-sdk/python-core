@@ -105,4 +105,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           workingDirectory: cdn-settings
+          wranglerVersion: "4.105.0"
           command: deploy
