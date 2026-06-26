@@ -15,9 +15,21 @@ jobs:
           python-version: "3.x"
       - name: Install build tools
         run: pip install build twine
+      - name: Check if version already published
+        run: |
+          VERSION=$(python setup.py --version 2>/dev/null)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/paykit-sdk/$VERSION/json)
+          if [ "$STATUS" = "200" ]; then
+            echo "Version $VERSION already on PyPI, skipping."
+            echo "SKIP=true" >> $GITHUB_ENV
+          fi
+
       - name: Build
+        if: env.SKIP != 'true'
         run: python -m build paykit/
+
       - name: Publish
+        if: env.SKIP != 'true'
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
