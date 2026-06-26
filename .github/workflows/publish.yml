@@ -39,6 +39,10 @@ jobs:
         run: |
           BASE="cdn-settings/packages"
 
+          # create release if it doesn't exist
+          gh release view "$TAG" --json tagName 2>/dev/null || \
+            gh release create "$TAG" --title "$TAG" --notes "SDK $TAG"
+
           for FRAMEWORK in "$BASE"/*/; do
             FRAMEWORK_NAME=$(basename "$FRAMEWORK")
             for PROVIDER in "$FRAMEWORK"/*/; do
