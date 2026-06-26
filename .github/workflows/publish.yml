@@ -7,20 +7,24 @@ on:
 
 jobs:
   publish:
+    if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+
       - name: Install build tools
         run: pip install build twine
+
       - name: Check if version already published
         run: |
+          cd paykit
           VERSION=$(python setup.py --version 2>/dev/null)
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/paykit-sdk/$VERSION/json)
           if [ "$STATUS" = "200" ]; then
-            echo "Version $VERSION already on PyPI, skipping."
             echo "SKIP=true" >> $GITHUB_ENV
           fi
 
@@ -35,7 +39,7 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: twine upload paykit/dist/*
 
-  cdn-release:
+  tarball-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -48,24 +52,56 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: |
-          BASE="cdn-settings/packages"
+          REPO: ${{ github.repository }}
+          run: |
+            BASE="cdn-settings/packages"
+            DIST="cdn-settings/dist/providers"
 
-          # create release if it doesn't exist
-          gh release view "$TAG" --json tagName 2>/dev/null || \
-            gh release create "$TAG" --title "$TAG" --notes "SDK $TAG"
+            gh release view "$TAG" --json tagName 2>/dev/null || \
+              gh release create "$TAG" --title "$TAG" --notes "SDK $TAG"
 
-          for FRAMEWORK in "$BASE"/*/; do
-            FRAMEWORK_NAME=$(basename "$FRAMEWORK")
-            for PROVIDER in "$FRAMEWORK"/*/; do
-              PROVIDER_NAME=$(basename "$PROVIDER")
-              VERSIONS=$(ls "$PROVIDER" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
+            for FRAMEWORK in "$BASE"/*/; do
+              FRAMEWORK_NAME=$(basename "$FRAMEWORK")
+              PROVIDERS=()
 
-              for VERSION in $VERSIONS; do
-                ARCHIVE="${FRAMEWORK_NAME}-${PROVIDER_NAME}-${VERSION//./-}.tar.gz"
-                tar -czf "$ARCHIVE" -C "$PROVIDER" "$VERSION"
-                gh release upload "$TAG" "$ARCHIVE" --clobber
+              for PROVIDER in "$FRAMEWORK"/*/; do
+                PROVIDER_NAME=$(basename "$PROVIDER")
+                VERSIONS=$(ls "$PROVIDER" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
+                LATEST=$(echo "$VERSIONS" | tail -1)
+                PROVIDERS+=("$PROVIDER_NAME")
+
+                for VERSION in $VERSIONS; do
+                  ARCHIVE="${FRAMEWORK_NAME}-${PROVIDER_NAME}-${VERSION//./-}.tar.gz"
+                  tar -czf "$ARCHIVE" -C "$PROVIDER" "$VERSION"
+                  gh release upload "$TAG" "$ARCHIVE" --clobber
+
+                  URL="https://github.com/$REPO/releases/download/$TAG/$ARCHIVE"
+                  DIR="$DIST/$FRAMEWORK_NAME/$PROVIDER_NAME"
+                  mkdir -p "$DIR"
+
+                  printf '{\n  "provider_name": "%s",\n  "version": "%s",\n  "framework": "%s",\n  "download_url": "%s"\n}\n' \
+                    "$PROVIDER_NAME" "$VERSION" "$FRAMEWORK_NAME" "$URL" > "$DIR/$VERSION"
+
+                  if [ "$VERSION" = "$LATEST" ]; then
+                    printf '{\n  "provider_name": "%s",\n  "version": "latest",\n  "framework": "%s",\n  "download_url": "%s"\n}\n' \
+                      "$PROVIDER_NAME" "$FRAMEWORK_NAME" "$URL" > "$DIR/latest"
+                  fi
+                done
               done
 
+              AVAILABLE=$(printf '"%s",' "${PROVIDERS[@]}" | sed 's/,$//')
+              mkdir -p "$DIST/$FRAMEWORK_NAME"
+              echo "[$AVAILABLE]" > "$DIST/$FRAMEWORK_NAME/available"
             done
-          done
+
+  deploy-cdn:
+    runs-on: ubuntu-latest
+    needs: tarball-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          workingDirectory: cdn-settings
