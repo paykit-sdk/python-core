@@ -83,6 +83,6 @@ paykit init
 For Django-specific integration (views, webhook handlers, payment link generation), see [Usage](/paykit/usage).
 
 
-# Inpired from [Paytechuz](https://paytechuz/paytechuz)
+## Inspired from [Paytechuz](https://paytechuz/paytechuz)
 
 Support [Muhammadali - Support group](https://t.me/paytechuz)
