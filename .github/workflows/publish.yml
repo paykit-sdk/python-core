@@ -21,8 +21,7 @@ jobs:
 
       - name: Check if version already published
         run: |
-          cd paykit
-          VERSION=$(python setup.py --version 2>/dev/null)
+          VERSION=$(grep '^version' paykit/setup.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/paykit-sdk/$VERSION/json)
           if [ "$STATUS" = "200" ]; then
             echo "SKIP=true" >> $GITHUB_ENV
@@ -105,3 +104,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           workingDirectory: cdn-settings
+          command: deploy
