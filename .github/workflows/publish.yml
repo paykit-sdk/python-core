@@ -25,7 +25,6 @@ jobs:
 
   cdn-release:
     runs-on: ubuntu-latest
-    needs: publish # only runs if publish succeeds
     permissions:
       contents: write
     steps:
